@@ -1,0 +1,16 @@
+{
+  "generatedAt": "2026-11-06T03:53:14.140Z",
+  "datum": "NAVD88 (meters), via USGS 3DEP",
+  "sources": {
+    "facilities": "OpenStreetMap contributors (ODbL), via Overpass API",
+    "elevation": {
+      "usgs-3dep": 406
+    }
+  },
+  "gridSize": 30,
+  "counts": {
+    "norfolk": 254,
+    "virginia-beach": 104,
+    "williamsburg": 48
+  }
+}
