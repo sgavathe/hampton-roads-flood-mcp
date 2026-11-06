@@ -57,13 +57,25 @@ resource "random_password" "mcp_api_key" {
   special = false
 }
 
-# ---------- Container Apps (scale to zero) ----------
+# ---------- Container Apps (scale to zero, inside the VNet) ----------
+# A workload-profiles environment is required for VNet + NAT Gateway egress.
+# Ingress stays public (it's a public demo site); everything behind it is private.
 resource "azurerm_container_app_environment" "this" {
-  name                       = "cae-${local.name}"
-  resource_group_name        = data.azurerm_resource_group.app.name
-  location                   = local.location
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
-  tags                       = local.tags
+  name                           = "cae-${local.name}"
+  resource_group_name            = data.azurerm_resource_group.app.name
+  location                       = local.location
+  log_analytics_workspace_id     = azurerm_log_analytics_workspace.this.id
+  infrastructure_subnet_id       = azurerm_subnet.apps.id
+  internal_load_balancer_enabled = false
+  tags                           = local.tags
+
+  workload_profile {
+    name                  = "Consumption"
+    workload_profile_type = "Consumption"
+  }
+
+  # The NAT association must exist before the environment starts using the subnet.
+  depends_on = [azurerm_subnet_nat_gateway_association.apps]
 }
 
 resource "azurerm_container_app" "web" {
@@ -71,6 +83,7 @@ resource "azurerm_container_app" "web" {
   resource_group_name          = data.azurerm_resource_group.app.name
   container_app_environment_id = azurerm_container_app_environment.this.id
   revision_mode                = "Single"
+  workload_profile_name        = "Consumption"
   tags                         = local.tags
 
   identity {
@@ -89,7 +102,7 @@ resource "azurerm_container_app" "web" {
   }
 
   dynamic "secret" {
-    for_each = var.arcgis_api_key == "" ? [] : [1]
+    for_each = nonsensitive(var.arcgis_api_key == "") ? [] : [1]
     content {
       name  = "arcgis-api-key"
       value = var.arcgis_api_key
@@ -121,8 +134,26 @@ resource "azurerm_container_app" "web" {
         secret_name = "mcp-api-key"
       }
 
+      env {
+        # Tells DefaultAzureCredential which user-assigned identity to use.
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.app.client_id
+      }
+
       dynamic "env" {
-        for_each = var.arcgis_api_key == "" ? [] : [1]
+        for_each = var.enable_ai ? {
+          AZURE_OPENAI_ENDPOINT    = azurerm_cognitive_account.openai[0].endpoint
+          AZURE_OPENAI_DEPLOYMENT  = azurerm_cognitive_deployment.agent[0].name
+          AZURE_OPENAI_API_VERSION = var.openai_api_version
+        } : {}
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = nonsensitive(var.arcgis_api_key == "") ? [] : [1]
         content {
           # Browser key, served to the page by /api/config. Restrict it by referrer in ArcGIS.
           name        = "ARCGIS_API_KEY"
@@ -142,5 +173,9 @@ resource "azurerm_container_app" "web" {
     ignore_changes = [template[0].container[0].image]
   }
 
-  depends_on = [azurerm_role_assignment.acr_pull]
+  depends_on = [
+    azurerm_role_assignment.acr_pull,
+    azurerm_role_assignment.openai_user,
+    azurerm_private_endpoint.openai,
+  ]
 }

@@ -9,6 +9,7 @@ dist/
 *.tfstate
 *.tfstate.*
 *.tfplan
+tfplan
 crash.log
 *.auto.tfvars
 terraform.tfvars

@@ -55,6 +55,54 @@
       <p class="area-sub">{{ a.subtitle }}</p>
     }
 
+    <section class="block mcp">
+      <div class="block-head">
+        <h2>Ask the map</h2>
+        <span class="tag">Azure OpenAI · MCP</span>
+      </div>
+      @if (aiEnabled()) {
+        <form class="ask" (submit)="$event.preventDefault(); ask()">
+          <textarea
+            rows="2"
+            maxlength="500"
+            placeholder="e.g. Which schools in Norfolk flood at +1.5 m?"
+            [value]="question()"
+            (input)="question.set($any($event.target).value)"
+            (keydown.enter)="$event.preventDefault(); ask()"
+            aria-label="Question about flood exposure"
+          ></textarea>
+          <button type="submit" [disabled]="asking() || !question().trim()">{{ asking() ? 'Thinking…' : 'Ask' }}</button>
+        </form>
+        @if (!askResult() && !asking()) {
+          <div class="suggest">
+            @for (s of suggestions; track s) {
+              <button type="button" (click)="ask(s)">{{ s }}</button>
+            }
+          </div>
+        }
+        @if (askError(); as e) {
+          <p class="ask-error">{{ e }}</p>
+        }
+        @if (askResult(); as r) {
+          <div class="answer" aria-live="polite">
+            <p>{{ r.answer }}</p>
+            @if (r.toolCalls.length) {
+              <div class="trace">
+                <span>MCP tools used</span>
+                @for (c of r.toolCalls; track $index) {
+                  <code [class.err]="c.isError">{{ toolLabel(c) }}</code>
+                }
+              </div>
+            }
+            <p class="fine">{{ r.model }} · {{ r.tokens }} tokens · {{ r.latencyMs | number }} ms · answers use only the tool results</p>
+          </div>
+        }
+      } @else {
+        <p class="small muted">The AI assistant isn't enabled on this deployment.</p>
+      }
+      <p class="fine">External agents (Claude, VS Code) can use the same tools at <code class="endpoint">{{ mcpUrl }}</code></p>
+    </section>
+
     <section class="block">
       <div class="block-head">
         <h2>Current conditions</h2>
@@ -119,15 +167,6 @@
       </label>
     </section>
 
-    <section class="block mcp">
-      <div class="block-head">
-        <h2>Ask an AI agent</h2>
-        <span class="tag">MCP</span>
-      </div>
-      <p class="small">The same engine behind this map is an MCP server. Connect Claude or VS Code and ask:</p>
-      <blockquote>“Which hospitals and substations in {{ area()?.name ?? 'Norfolk' }} are under water at +2 m?”</blockquote>
-      <code class="endpoint">{{ mcpUrl }}</code>
-    </section>
   </aside>
 
   <!-- ===== Right panel: exposure ===== -->

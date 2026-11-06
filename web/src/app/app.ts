@@ -2,6 +2,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import {
   AreasResponse,
+  AskResult,
   Comparison,
   Conditions,
   DepthClass,
@@ -62,6 +63,16 @@ export class App {
   protected readonly buildingsAvailable = signal<boolean | null>(null);
   protected readonly showMethod = signal(false);
   protected readonly panelsOpen = signal(true);
+  protected readonly aiEnabled = signal(false);
+  protected readonly question = signal('');
+  protected readonly asking = signal(false);
+  protected readonly askResult = signal<AskResult | null>(null);
+  protected readonly askError = signal<string | null>(null);
+  protected readonly suggestions = [
+    'Which hospitals and substations in Norfolk are under water at +2 m?',
+    'Compare Virginia Beach at 1, 2 and 3 meters.',
+    'What is the lowest fire station in Williamsburg, and when does it flood?',
+  ];
 
   protected readonly area = computed(() => this.meta()?.areas.find((a) => a.id === this.areaId()) ?? null);
   protected readonly categories = computed(() => this.meta()?.categories ?? []);
@@ -126,9 +137,10 @@ export class App {
 
   private async bootstrap() {
     try {
-      const [config, meta] = await Promise.all([this.api.config(), this.api.areas()]);
+      const [config, meta, health] = await Promise.all([this.api.config(), this.api.areas(), this.api.health()]);
       this.config.set(config);
       this.meta.set(meta);
+      this.aiEnabled.set(health.ai);
     } catch (e) {
       this.fail(e);
     }
@@ -157,6 +169,33 @@ export class App {
     } catch (e) {
       this.fail(e);
     }
+  }
+
+  protected async ask(text?: string) {
+    const q = (text ?? this.question()).trim();
+    if (!q || this.asking()) return;
+    this.question.set(q);
+    this.asking.set(true);
+    this.askError.set(null);
+    try {
+      const r = await this.api.ask(q);
+      this.askResult.set(r);
+      // Drive the map from what the agent actually looked up.
+      const a = r.mapAction;
+      if (a?.area && a.area !== this.areaId()) this.selectArea(a.area);
+      if (a?.waterLevelM !== null && a?.waterLevelM !== undefined) this.setLevel(a.waterLevelM);
+      if (a?.facilityId) await this.openFacility(a.facilityId, true);
+      else if (a?.focus) this.focus.set(a.focus);
+    } catch (e) {
+      this.askError.set((e as Error).message);
+    } finally {
+      this.asking.set(false);
+    }
+  }
+
+  protected toolLabel(c: AskResult['toolCalls'][number]): string {
+    const args = Object.values(c.args ?? {}).map((v) => (Array.isArray(v) ? `[${v.join(', ')}]` : String(v))).join(', ');
+    return `${c.name}(${args})`;
   }
 
   protected depthOf(id: string): DepthClass {

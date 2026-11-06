@@ -23,3 +23,16 @@ output "acr_name" {
 output "acr_login_server" {
   value = azurerm_container_registry.this.login_server
 }
+
+output "nat_egress_ip" {
+  description = "Static public IP all outbound traffic leaves from (allow-list it with partners if needed)."
+  value       = var.enable_nat_gateway ? azurerm_public_ip.nat[0].ip_address : null
+}
+
+output "openai_endpoint" {
+  value = var.enable_ai ? azurerm_cognitive_account.openai[0].endpoint : null
+}
+
+output "openai_public_access" {
+  value = var.enable_ai ? azurerm_cognitive_account.openai[0].public_network_access_enabled : null
+}

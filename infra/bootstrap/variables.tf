@@ -38,6 +38,9 @@ variable "resource_providers" {
   type        = list(string)
   default = [
     "Microsoft.App",
+    "Microsoft.CognitiveServices",
+    "Microsoft.ContainerService",
+    "Microsoft.Network",
     "Microsoft.ContainerRegistry",
     "Microsoft.ManagedIdentity",
     "Microsoft.OperationalInsights",
