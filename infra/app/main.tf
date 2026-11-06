@@ -102,7 +102,7 @@ resource "azurerm_container_app" "web" {
   }
 
   dynamic "secret" {
-    for_each = var.arcgis_api_key == "" ? [] : [1]
+    for_each = nonsensitive(var.arcgis_api_key == "") ? [] : [1]
     content {
       name  = "arcgis-api-key"
       value = var.arcgis_api_key
@@ -153,7 +153,7 @@ resource "azurerm_container_app" "web" {
       }
 
       dynamic "env" {
-        for_each = var.arcgis_api_key == "" ? [] : [1]
+        for_each = nonsensitive(var.arcgis_api_key == "") ? [] : [1]
         content {
           # Browser key, served to the page by /api/config. Restrict it by referrer in ArcGIS.
           name        = "ARCGIS_API_KEY"
