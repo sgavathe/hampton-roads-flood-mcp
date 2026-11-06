@@ -1,0 +1,4 @@
+@import "@arcgis/core/assets/esri/themes/dark/main.css";
+
+html, body { margin: 0; height: 100%; background: #05090d; }
+body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }

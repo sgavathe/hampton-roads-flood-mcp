@@ -1,0 +1,277 @@
+<div class="stage">
+  @if (config(); as cfg) {
+    <app-scene-view
+      [config]="cfg"
+      [area]="area()"
+      [facilities]="facilities()"
+      [depthById]="depthById()"
+      [waterLevel]="level()"
+      [showFacilities]="showFacilities()"
+      [showBuildings]="showBuildings()"
+      [showWater]="showWater()"
+      [focus]="focus()"
+      (facilityClick)="openFacility($event)"
+      (buildingsAvailable)="buildingsAvailable.set($event)"
+    />
+  }
+
+  @if (meta(); as m) {
+    @if (!m.ready) {
+      <div class="notice">
+        <strong>Facility data has not been generated yet.</strong>
+        Run <code>node scripts/build-data.mjs</code> or the <em>Refresh data</em> workflow, then redeploy.
+      </div>
+    }
+  }
+  @if (error(); as e) {
+    <div class="notice error">{{ e }}</div>
+  }
+
+  <button type="button" class="panel-toggle" (click)="panelsOpen.set(!panelsOpen())" [attr.aria-expanded]="panelsOpen()">
+    {{ panelsOpen() ? 'Hide panels' : 'Show panels' }}
+  </button>
+
+  <!-- ===== Left panel: place, live conditions, layers, MCP ===== -->
+  <aside class="panel left" [class.hidden]="!panelsOpen()">
+    <header class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><path d="M2 20c3 0 3-2 6-2s3 2 6 2 3-2 6-2 3 2 6 2 3-2 4-2" /><path d="M2 26c3 0 3-2 6-2s3 2 6 2 3-2 6-2 3 2 6 2 3-2 4-2" /><path d="M16 4l6 10H10z" /></svg>
+      </div>
+      <div>
+        <p class="eyebrow">ArcGIS · MCP · Azure</p>
+        <h1>Hampton Roads<br />Flood What-If</h1>
+      </div>
+    </header>
+
+    <nav class="areas" aria-label="Study area">
+      @for (a of meta()?.areas ?? []; track a.id) {
+        <button type="button" [class.active]="a.id === areaId()" (click)="selectArea(a.id)">
+          <span class="name">{{ a.name }}</span>
+          <span class="sub">{{ a.facilities }} facilities</span>
+        </button>
+      }
+    </nav>
+    @if (area(); as a) {
+      <p class="area-sub">{{ a.subtitle }}</p>
+    }
+
+    <section class="block">
+      <div class="block-head">
+        <h2>Current conditions</h2>
+        <span class="live"><i></i>Live</span>
+      </div>
+      @if (conditions()?.weather; as w) {
+        <div class="weather">
+          <span class="wx-icon" aria-hidden="true">{{ weatherIcon(w.summary) }}</span>
+          <div>
+            <div class="temp">{{ w.tempF | number: '1.0-0' }}°F</div>
+            <div class="muted">{{ w.summary }}</div>
+          </div>
+        </div>
+        <dl class="kv">
+          <div><dt>Feels</dt><dd>{{ w.feelsLikeF | number: '1.0-0' }}°</dd></div>
+          <div><dt>Humidity</dt><dd>{{ w.humidityPct }}%</dd></div>
+          <div><dt>Wind</dt><dd>{{ w.windMph | number: '1.0-0' }} mph {{ w.windDir }}</dd></div>
+          <div><dt>Precip</dt><dd>{{ w.precipIn | number: '1.2-2' }} in</dd></div>
+        </dl>
+        <div class="days">
+          @for (d of w.daily; track d.date; let first = $first) {
+            <div class="day" [class.today]="first">
+              <span class="dname">{{ first ? 'Today' : (d.date | date: 'EEE') }}</span>
+              <span class="dicon" aria-hidden="true">{{ weatherIcon(d.summary) }}</span>
+              <span class="dpct">{{ d.precipChancePct }}%</span>
+              <span class="dtemp">{{ d.highF | number: '1.0-0' }}° <i>{{ d.lowF | number: '1.0-0' }}°</i></span>
+            </div>
+          }
+        </div>
+      } @else if (conditions() === null) {
+        <p class="muted small">Loading weather…</p>
+      } @else {
+        <p class="muted small">Weather is unavailable right now.</p>
+      }
+      @if (conditions()?.tide; as t) {
+        <div class="tide">
+          <span>Tide · {{ t.station }}</span>
+          <strong>{{ t.waterLevelM | number: '1.2-2' }} m {{ t.datum }}</strong>
+        </div>
+      }
+      <p class="fine">Open-Meteo &amp; NOAA CO-OPS · context only, not linked to the scenario</p>
+    </section>
+
+    <section class="block">
+      <h2>Layers</h2>
+      <label class="toggle">
+        <span>Critical facilities</span>
+        <input type="checkbox" role="switch" [checked]="showFacilities()" (change)="showFacilities.set(!showFacilities())" />
+      </label>
+      <label class="toggle">
+        <span>Water surface</span>
+        <input type="checkbox" role="switch" [checked]="showWater()" (change)="showWater.set(!showWater())" />
+      </label>
+      <label class="toggle" [class.disabled]="buildingsAvailable() === false">
+        <span>
+          3D buildings
+          @if (buildingsAvailable() === false) {
+            <small>Unavailable · set an ArcGIS API key</small>
+          }
+        </span>
+        <input type="checkbox" role="switch" [disabled]="buildingsAvailable() === false" [checked]="showBuildings() && buildingsAvailable() !== false" (change)="showBuildings.set(!showBuildings())" />
+      </label>
+    </section>
+
+    <section class="block mcp">
+      <div class="block-head">
+        <h2>Ask an AI agent</h2>
+        <span class="tag">MCP</span>
+      </div>
+      <p class="small">The same engine behind this map is an MCP server. Connect Claude or VS Code and ask:</p>
+      <blockquote>“Which hospitals and substations in {{ area()?.name ?? 'Norfolk' }} are under water at +2 m?”</blockquote>
+      <code class="endpoint">{{ mcpUrl }}</code>
+    </section>
+  </aside>
+
+  <!-- ===== Right panel: exposure ===== -->
+  <aside class="panel right" [class.hidden]="!panelsOpen()">
+    @if (selected(); as f) {
+      <section class="facility">
+        <button type="button" class="close" (click)="selected.set(null)" aria-label="Close facility details">×</button>
+        <p class="eyebrow" [style.color]="categoryColors[f.category]">{{ categoryLabel().get(f.category) }}</p>
+        <h2 class="fname">{{ f.name }}</h2>
+        <dl class="kv two">
+          <div><dt>Ground</dt><dd>{{ f.elevationM | number: '1.1-1' }} m</dd></div>
+          <div><dt>First wet at</dt><dd>+{{ f.floodsAtLevelM | number: '1.1-1' }} m</dd></div>
+        </dl>
+        <div class="fscen">
+          @for (s of f.scenarios; track s.waterLevelM) {
+            <div [style.--c]="depthColors[s.status]">
+              <span>+{{ s.waterLevelM }} m</span>
+              <strong>{{ s.depthM === null ? 'Dry' : (s.depthM | number: '1.1-1') + ' m' }}</strong>
+            </div>
+          }
+        </div>
+        <a class="osm" [href]="f.osmUrl" target="_blank" rel="noopener">View on OpenStreetMap ↗</a>
+      </section>
+    }
+
+    <section class="block">
+      <div class="block-head">
+        <h2>Facility exposure</h2>
+        <span class="tag warn">What-if</span>
+      </div>
+      @if (exposure(); as x) {
+        <p class="scenario">{{ x.area.name }} · water at +{{ x.waterLevelM | number: '1.1-1' }} m</p>
+        <div class="big">
+          <span class="num">{{ x.totals.exposed }}</span>
+          <span class="of">of {{ x.totals.facilities }} critical facilities<br />at or below the water</span>
+        </div>
+        <div class="cats">
+          @for (c of x.byCategory; track c.id) {
+            @if (c.total) {
+              <div class="cat" [style.--c]="categoryColors[c.id]" [class.zero]="!c.exposed">
+                <strong>{{ c.exposed }}<small>/{{ c.total }}</small></strong>
+                <span>{{ c.label }}</span>
+              </div>
+            }
+          }
+        </div>
+
+        @if (topExposed().length) {
+          <h3>Deepest exposure</h3>
+          <ul class="list">
+            @for (e of topExposed(); track e.id) {
+              <li>
+                <button type="button" (click)="openFacility(e.id, true)">
+                  <i [style.background]="depthColors[e.depthClass]"></i>
+                  <span class="lname">{{ e.name }}</span>
+                  <span class="ldepth">{{ e.depthM | number: '1.1-1' }} m</span>
+                </button>
+              </li>
+            }
+          </ul>
+        }
+      } @else {
+        <p class="muted small">Computing…</p>
+      }
+    </section>
+
+    <section class="block">
+      <h2>Compare scenarios</h2>
+      <div class="bars">
+        @for (s of compareRows(); track s.waterLevelM) {
+          <button type="button" class="bar-row" [class.active]="s.waterLevelM === level()" (click)="setLevel(s.waterLevelM)">
+            <span class="lvl">+{{ s.waterLevelM }} m</span>
+            <span class="track">
+              @for (seg of s.segments; track seg.id) {
+                <span class="seg" [style.width.%]="seg.pct" [style.background]="categoryColors[seg.id]"></span>
+              }
+            </span>
+            <span class="cnt">{{ s.exposed }}</span>
+          </button>
+        }
+      </div>
+      <div class="legend">
+        @for (c of categories(); track c.id) {
+          <span><i [style.background]="categoryColors[c.id]"></i>{{ c.label }}</span>
+        }
+      </div>
+
+      <h3>Sampled land at or below the water</h3>
+      <div class="rings">
+        @for (s of comparison()?.scenarios ?? []; track s.waterLevelM) {
+          <button type="button" class="ring" [class.active]="s.waterLevelM === level()" (click)="setLevel(s.waterLevelM)">
+            <svg viewBox="0 0 64 64" aria-hidden="true">
+              <circle cx="32" cy="32" r="26" class="bg" />
+              <circle cx="32" cy="32" r="26" class="fg" [attr.stroke-dasharray]="ring(s.landFloodedPct)" />
+            </svg>
+            <strong>{{ s.landFloodedPct ?? '–' }}%</strong>
+            <span>+{{ s.waterLevelM }} m</span>
+          </button>
+        }
+      </div>
+    </section>
+
+    <section class="block foot">
+      <div class="depth-legend">
+        <span>Modeled depth</span>
+        <span><i [style.background]="depthColors.shallow"></i>&lt; 1.5 m</span>
+        <span><i [style.background]="depthColors.deep"></i>≥ 1.5 m</span>
+        <span><i [style.background]="depthColors.dry"></i>Dry</span>
+      </div>
+      <button type="button" class="link" (click)="showMethod.set(!showMethod())">ⓘ Assumptions &amp; method</button>
+      @if (showMethod()) {
+        <p class="fine method">
+          “Bathtub” screening model: a facility counts as exposed when the water level (meters above NAVD88, roughly mean sea level)
+          reaches its ground elevation from USGS 3DEP. It ignores levees, drainage, waves, timing and whether water can actually reach
+          the spot. Facilities are OpenStreetMap points; the land share is a {{ meta()?.manifest ? 'regular grid sample' : 'grid sample' }}
+          of ground above 0 m. Use for exploration, not for planning or emergency decisions.
+        </p>
+      }
+      @if (meta()?.manifest; as man) {
+        <p class="fine">Facilities © OpenStreetMap contributors · Elevation USGS 3DEP · Data {{ man.generatedAt | date: 'MMM d, y' }}</p>
+      }
+    </section>
+  </aside>
+
+  <!-- ===== Bottom: water level ===== -->
+  <footer class="dock">
+    <div class="dock-title">
+      <span class="eyebrow warn">What-if · not a forecast</span>
+      <strong>Water level</strong>
+    </div>
+    <div class="presets" role="radiogroup" aria-label="Water level preset">
+      @for (p of presets; track p.level) {
+        <button type="button" role="radio" [attr.aria-checked]="level() === p.level" [class.active]="level() === p.level" (click)="setLevel(p.level)">
+          <span class="pl">{{ p.label }}</span>
+          <span class="ps">{{ p.sub }}</span>
+        </button>
+      }
+    </div>
+    <div class="slider">
+      <label for="lvl">Fine-tune <strong>+{{ level() | number: '1.1-1' }} m</strong></label>
+      <input id="lvl" type="range" min="0" max="5" step="0.1" [value]="level()" (input)="setLevel($any($event.target).value)" />
+      @if (tideHint() !== null) {
+        <button type="button" class="tide-btn" (click)="setLevel(tideHint()!)">Use live tide ({{ tideHint() | number: '1.1-1' }} m)</button>
+      }
+    </div>
+  </footer>
+</div>

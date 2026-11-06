@@ -1,0 +1,50 @@
+name: Refresh data
+
+# Rebuilds data/ from OpenStreetMap (Overpass) and USGS 3DEP elevation, then opens
+# a PR so every data change is reviewable. Merging the PR triggers a deploy.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 1 * *" # monthly, 06:17 UTC on the 1st
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  build-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+
+      - name: Build facilities and elevation samples
+        run: node scripts/build-data.mjs
+
+      - name: Sanity check
+        run: |
+          node -e '
+            const m = require("./data/manifest.json");
+            console.log(JSON.stringify(m, null, 2));
+            const low = Object.entries(m.counts).filter(([, n]) => n < 10);
+            if (low.length) { console.error("Suspiciously few facilities:", low); process.exit(1); }
+          '
+
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: data/refresh
+          delete-branch: true
+          commit-message: "data: refresh OSM facilities and USGS elevations"
+          title: "Data refresh: OSM facilities + USGS 3DEP elevations"
+          body: |
+            Automated rebuild of `data/` by `scripts/build-data.mjs`.
+
+            See `data/manifest.json` in the diff for counts per area and elevation sources.
+          add-paths: data/*

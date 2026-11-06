@@ -1,0 +1,25 @@
+{
+  "name": "flood-api",
+  "version": "1.0.0",
+  "description": "Flood what-if exposure API and MCP server for Hampton Roads",
+  "main": "src/server.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "ALLOW_ANONYMOUS_MCP=true node --watch src/server.js",
+    "test": "node --test",
+    "data": "node ../scripts/build-data.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "express": "^5.3.0",
+    "zod": "^4.6.7"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  }
+}

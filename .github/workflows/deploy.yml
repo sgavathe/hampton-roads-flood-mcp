@@ -1,0 +1,141 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: API tests
+        working-directory: api
+        run: npm ci && npm test
+      - name: Require generated data
+        run: |
+          test -s data/assets.geojson || {
+            echo "::error::data/assets.geojson is missing. Run the 'Refresh data' workflow and merge its PR first."
+            exit 1
+          }
+
+  deploy:
+    name: Terraform apply + container rollout
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.tf.outputs.app_url }}
+    permissions:
+      id-token: write # GitHub OIDC -> Entra ID federated credential, no client secret
+      contents: read
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+      TF_VAR_arcgis_api_key: ${{ secrets.ARCGIS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "~1.9", terraform_wrapper: false }
+
+      - name: Terraform init
+        working-directory: infra/app
+        run: >
+          terraform init -input=false
+          -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}"
+          -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}"
+          -backend-config="container_name=tfstate"
+          -backend-config="key=${{ vars.TFSTATE_KEY || 'app.tfstate' }}"
+
+      - name: Terraform apply
+        working-directory: infra/app
+        run: >
+          terraform apply -input=false -auto-approve
+          -var="resource_group_name=${{ vars.APP_RESOURCE_GROUP }}"
+          -var="prefix=${{ vars.NAME_PREFIX }}"
+
+      - name: Read Terraform outputs
+        id: tf
+        working-directory: infra/app
+        run: |
+          {
+            echo "app_url=$(terraform output -raw app_url)"
+            echo "app_name=$(terraform output -raw container_app_name)"
+            echo "acr_name=$(terraform output -raw acr_name)"
+            echo "acr_server=$(terraform output -raw acr_login_server)"
+          } >> "$GITHUB_OUTPUT"
+          # Sensitive: mask before exporting so it never appears in logs.
+          key="$(terraform output -raw mcp_api_key)"
+          echo "::add-mask::$key"
+          echo "MCP_API_KEY=$key" >> "$GITHUB_ENV"
+
+      - name: Log in to ACR (Entra token, no admin user)
+        run: az acr login --name "${{ steps.tf.outputs.acr_name }}"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.tf.outputs.acr_server }}/flood-app:${{ github.sha }}
+            ${{ steps.tf.outputs.acr_server }}/flood-app:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Roll out new revision
+        run: >
+          az containerapp update
+          --name "${{ steps.tf.outputs.app_name }}"
+          --resource-group "${{ vars.APP_RESOURCE_GROUP }}"
+          --image "${{ steps.tf.outputs.acr_server }}/flood-app:${{ github.sha }}"
+          --output none
+
+      - name: Smoke test
+        run: |
+          url="${{ steps.tf.outputs.app_url }}"
+          for i in $(seq 1 20); do
+            body=$(curl -fsS "$url/api/health" || true)
+            if echo "$body" | grep -q '"dataReady":true'; then
+              echo "Healthy: $body"
+              curl -fsS "$url/api/exposure?area=norfolk&level=2" | head -c 300
+              echo
+              echo "MCP tools/list:"
+              curl -fsS -X POST "$url/mcp" \
+                -H "Authorization: Bearer $MCP_API_KEY" \
+                -H 'content-type: application/json' \
+                -H 'accept: application/json, text/event-stream' \
+                -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | grep -q flood_exposure
+              echo "MCP OK"
+              code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/mcp" -H 'content-type: application/json' -d '{}')
+              [ "$code" = "401" ] || { echo "MCP endpoint is not protected (got $code)"; exit 1; }
+              echo "Deployed: $url  (MCP: $url/mcp)"
+              exit 0
+            fi
+            echo "Waiting for revision ($i)..."; sleep 15
+          done
+          echo "Smoke test failed"; exit 1

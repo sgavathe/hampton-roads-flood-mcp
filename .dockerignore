@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/.angular
+**/.terraform
+**/*.tfstate*
+.git
+.github
+infra
+docs
+*.md

@@ -1,0 +1,38 @@
+{
+  "datum": "NAVD88 (meters), via USGS 3DEP",
+  "areas": [
+    {
+      "id": "norfolk",
+      "name": "Norfolk",
+      "subtitle": "Downtown, Ghent & Naval Station Norfolk",
+      "bbox": [-76.34, 36.83, -76.18, 36.97],
+      "camera": { "position": [-76.255, 36.775, 4200], "heading": 352, "tilt": 66 },
+      "tideStation": { "id": "8638610", "name": "Sewells Point" }
+    },
+    {
+      "id": "virginia-beach",
+      "name": "Virginia Beach",
+      "subtitle": "Oceanfront, Rudee Inlet & Lynnhaven",
+      "bbox": [-76.12, 36.78, -75.96, 36.93],
+      "camera": { "position": [-76.075, 36.72, 4600], "heading": 18, "tilt": 66 },
+      "tideStation": { "id": "8638901", "name": "Chesapeake Bay Bridge-Tunnel" }
+    },
+    {
+      "id": "williamsburg",
+      "name": "Williamsburg",
+      "subtitle": "Colonial Williamsburg, Jamestown & James River",
+      "bbox": [-76.80, 37.19, -76.66, 37.31],
+      "camera": { "position": [-76.73, 37.13, 4400], "heading": 0, "tilt": 66 },
+      "tideStation": { "id": "8637689", "name": "Yorktown USCG Training Center" }
+    }
+  ],
+  "categories": [
+    { "id": "power", "label": "Power", "description": "Substations and power plants" },
+    { "id": "water", "label": "Water & wastewater", "description": "Treatment plants, pumping stations, water towers" },
+    { "id": "hospital", "label": "Hospitals", "description": "Hospitals" },
+    { "id": "fire_ems", "label": "Fire & EMS", "description": "Fire and ambulance stations" },
+    { "id": "police", "label": "Police", "description": "Police stations" },
+    { "id": "school", "label": "Schools", "description": "Schools (common emergency shelters)" },
+    { "id": "telecom", "label": "Telecom", "description": "Telephone exchanges and communication towers" }
+  ]
+}
