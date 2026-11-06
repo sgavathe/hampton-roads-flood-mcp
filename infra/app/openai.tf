@@ -83,4 +83,7 @@ resource "azurerm_private_endpoint" "openai" {
     name                 = "openai"
     private_dns_zone_ids = [azurerm_private_dns_zone.openai[0].id]
   }
+  # The account rejects private endpoints while it is still provisioning or
+  # being updated by the model deployment, so wait for both.
+  depends_on = [azurerm_cognitive_deployment.agent]
 }

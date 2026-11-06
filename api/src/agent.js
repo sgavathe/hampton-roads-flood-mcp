@@ -48,25 +48,46 @@ export function toOpenAiTools(mcpTools) {
   }));
 }
 
-// What should the map do after this answer? Follow the last successful map-relevant call.
+export const MAX_HIGHLIGHT = 25;
+
+// What should the map do after this answer? Follow the last successful map-relevant call:
+// which area and water level to show, and which facilities the answer is about
+// (highlightIds), so the user sees on the map what the agent found.
 export function mapActionFrom(calls, data) {
   let action = null;
   for (const c of calls) {
     if (c.isError) continue;
     const area = data.areas.find((a) => a.id === String(c.args?.area ?? '').toLowerCase())?.id;
+    const keepLevel = action?.waterLevelM ?? null;
+
     if (c.name === 'flood_exposure' && area) {
-      action = { area, waterLevelM: c.args.water_level_m, focus: null };
+      // Point at the deepest few when a level is asked about; the map colours the rest.
+      const ids = (c.result?.exposed ?? []).slice(0, 10).map((e) => e.id);
+      action = { area, waterLevelM: c.args.water_level_m, focus: null, highlightIds: ids };
     } else if (c.name === 'compare_scenarios' && area) {
       const levels = c.args.water_levels_m ?? [1, 2, 3];
-      action = { area, waterLevelM: Math.max(...levels), focus: null };
-    } else if ((c.name === 'find_facilities' || c.name === 'current_conditions') && area) {
-      action = { area, waterLevelM: action?.waterLevelM ?? null, focus: null };
+      action = { area, waterLevelM: Math.max(...levels), focus: null, highlightIds: [] };
+    } else if (c.name === 'find_facilities' && area) {
+      const found = c.result?.facilities ?? [];
+      const ids = found.slice(0, MAX_HIGHLIGHT).map((f) => f.id);
+      // "flooded at/above X m" questions arrive as max_elevation_m: show that water level.
+      const level = Number.isFinite(c.args.max_elevation_m) ? Math.min(5, Math.max(0, c.args.max_elevation_m)) : keepLevel;
+      action = {
+        area,
+        waterLevelM: level,
+        focus: found.length === 1 ? found[0].coordinates : null,
+        facilityId: found.length === 1 ? found[0].id : undefined,
+        highlightIds: ids,
+      };
+    } else if (c.name === 'current_conditions' && area) {
+      action = { area, waterLevelM: keepLevel, focus: null, highlightIds: action?.highlightIds ?? [] };
     } else if (c.name === 'facility_details' && c.result?.coordinates) {
       action = {
         area: c.result.area ?? action?.area ?? null,
-        waterLevelM: action?.waterLevelM ?? null,
+        waterLevelM: keepLevel,
         focus: c.result.coordinates,
         facilityId: c.result.id,
+        highlightIds: [c.result.id],
       };
     }
   }

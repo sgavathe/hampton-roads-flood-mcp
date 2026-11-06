@@ -18,8 +18,8 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with: { node-version: 22 }
       - name: API tests
         working-directory: api
@@ -48,7 +48,7 @@ jobs:
       ARM_USE_OIDC: "true"
       TF_VAR_arcgis_api_key: ${{ secrets.ARCGIS_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Azure login (OIDC)
         uses: azure/login@v2

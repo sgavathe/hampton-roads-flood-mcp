@@ -56,6 +56,7 @@ export class App {
   protected readonly conditions = signal<Conditions | null>(null);
   protected readonly selected = signal<FacilityDetails | null>(null);
   protected readonly focus = signal<[number, number] | null>(null);
+  protected readonly highlightIds = signal<string[]>([]);
   protected readonly error = signal<string | null>(null);
   protected readonly showFacilities = signal(true);
   protected readonly showBuildings = signal(true);
@@ -152,8 +153,13 @@ export class App {
   }
 
   protected selectArea(id: string) {
+    if (id !== this.areaId()) this.highlightIds.set([]);
     this.areaId.set(id);
     this.focus.set(null);
+  }
+
+  protected clearHighlight() {
+    this.highlightIds.set([]);
   }
 
   protected setLevel(value: number | string) {
@@ -184,6 +190,7 @@ export class App {
       const a = r.mapAction;
       if (a?.area && a.area !== this.areaId()) this.selectArea(a.area);
       if (a?.waterLevelM !== null && a?.waterLevelM !== undefined) this.setLevel(a.waterLevelM);
+      this.highlightIds.set(a?.highlightIds ?? []);
       if (a?.facilityId) await this.openFacility(a.facilityId, true);
       else if (a?.focus) this.focus.set(a.focus);
     } catch (e) {

@@ -10,6 +10,7 @@
       [showBuildings]="showBuildings()"
       [showWater]="showWater()"
       [focus]="focus()"
+      [highlightIds]="highlightIds()"
       (facilityClick)="openFacility($event)"
       (buildingsAvailable)="buildingsAvailable.set($event)"
     />
@@ -93,6 +94,12 @@
                   <code [class.err]="c.isError">{{ toolLabel(c) }}</code>
                 }
               </div>
+            }
+            @if (highlightIds().length) {
+              <p class="highlight-note">
+                <span>◉ {{ highlightIds().length }} {{ highlightIds().length === 1 ? 'facility' : 'facilities' }} highlighted on the map</span>
+                <button type="button" (click)="clearHighlight()">Clear</button>
+              </p>
             }
             <p class="fine">{{ r.model }} · {{ r.tokens }} tokens · {{ r.latencyMs | number }} ms · answers use only the tool results</p>
           </div>
