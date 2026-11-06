@@ -41,6 +41,7 @@ locals {
   # Roles the pipeline may hand out to the app's managed identity, nothing else.
   delegable_role_ids = [
     "7f951dda-4ed3-4680-a7ca-43fe172d538d", # AcrPull
+    "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd", # Cognitive Services OpenAI User
   ]
   delegable_guids = join(", ", local.delegable_role_ids)
 }
@@ -117,7 +118,7 @@ resource "azurerm_role_assignment" "app_contributor" {
   principal_id         = azuread_service_principal.github.object_id
 }
 
-# Can create role assignments in the app RG, but only for the role above.
+# Can create role assignments in the app RG, but only for the roles above.
 resource "azurerm_role_assignment" "app_rbac_admin" {
   scope                = azurerm_resource_group.app.id
   role_definition_name = "Role Based Access Control Administrator"

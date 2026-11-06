@@ -1,25 +1,36 @@
 # Hampton Roads Flood What-If
 
-A 3D flood what-if dashboard for **Norfolk, Virginia Beach and Williamsburg**, plus an **MCP server** that gives AI agents the same answers the map shows. Raise the water level and see which critical facilities (power, water and wastewater, hospitals, fire/EMS, police, schools, telecom) end up at or below it, how deep, and how much of the land is affected.
+A 3D flood what-if dashboard for **Norfolk, Virginia Beach and Williamsburg**, an **MCP server** that gives AI agents the same answers the map shows, and an **Azure OpenAI agent** ("Ask the map") that answers plain-English questions by calling those MCP tools and then drives the map. Raise the water level and see which critical facilities (power, water and wastewater, hospitals, fire/EMS, police, schools, telecom) end up at or below it, how deep, and how much of the land is affected.
 
-Built with the ArcGIS Maps SDK for JavaScript (SceneView), Angular, Node/Express and the MCP TypeScript SDK; deployed to Azure Container Apps with Terraform and GitHub Actions (OIDC, no stored Azure credentials).
+Built with the ArcGIS Maps SDK for JavaScript (SceneView), Angular, Node/Express, the MCP TypeScript SDK and Azure OpenAI. Deployed to Azure Container Apps inside a VNet with a NAT Gateway, with Azure OpenAI reachable only through a private endpoint, using Terraform and GitHub Actions (OIDC, no stored Azure credentials).
 
 > **What-if, not a forecast.** This is a screening ("bathtub") model. See [Method and limits](#method-and-limits).
 
 ```mermaid
 flowchart LR
-  U[Browser] -->|3D scene, /api| CA
-  AG["AI agents<br/>Claude, VS Code"] -->|MCP /mcp<br/>bearer key| CA
-  CA["Azure Container Apps<br/>Angular + ArcGIS SceneView<br/>Express API + MCP server<br/>scale 0-2"]
-  CA --> ENG[("Exposure engine<br/>data/*.json baked into image")]
-  CA -. live context .-> OM[Open-Meteo] & NOAA[NOAA tide gauges]
-  U -. tiles, terrain, buildings .-> ESRI[ArcGIS basemaps & World Elevation]
+  U[Browser] -->|HTTPS| ING
+  AG["External agents<br/>Claude, VS Code"] -->|"MCP /mcp (bearer key)"| ING
+
+  subgraph VNET["VNet 10.40.0.0/16"]
+    subgraph APPS["snet-apps 10.40.0.0/23 (delegated)"]
+      ING["Container Apps ingress"] --> CA["Container App<br/>3D app + REST API<br/>MCP server + agent"]
+    end
+    subgraph PE["snet-pe 10.40.2.0/24"]
+      PEP["Private endpoint"]
+    end
+  end
+
+  CA -->|"agent = MCP client<br/>(in-memory)"| CA
+  CA -->|"private IP, managed identity"| PEP --> AOAI["Azure OpenAI<br/>gpt-4.1-mini<br/>public access OFF, keys OFF"]
+  CA -->|outbound| NAT["NAT Gateway<br/>static public IP"] --> NET["Open-Meteo, NOAA,<br/>Esri, ACR"]
+  DNS["Private DNS zone<br/>privatelink.openai.azure.com"] -. linked .- VNET
+  GH["GitHub Actions (OIDC)"] -->|Terraform, image, rollout| VNET
 
   subgraph DATA["Refresh data workflow (monthly, opens a PR)"]
-    OSM[OpenStreetMap / Overpass] --> B[scripts/build-data.mjs]
-    USGS[USGS 3DEP elevation] --> B
+    OSM[OpenStreetMap] --> B[scripts/build-data.mjs]
+    USGS[USGS 3DEP] --> B
   end
-  B --> ENG
+  B -->|data/*.json baked into image| CA
 ```
 
 ## What's in the app
@@ -29,6 +40,19 @@ flowchart LR
 - **Exposure panel**: facilities exposed at the current level by category, the deepest ones (click to fly there), a +1/+2/+3 m comparison with category-stacked bars, and the share of sampled land at or below each level.
 - **Water level dock**: presets 0 / +1 / +2 / +3 m, a 0–5 m slider, and a "use live tide" shortcut when the nearest NOAA gauge reports in NAVD88.
 - **Live context**: current weather and 5-day forecast (Open-Meteo) and the latest tide-gauge reading (Sewells Point, CBBT, Yorktown). Context only; not linked to the scenario.
+
+## Ask the map (Azure OpenAI + MCP)
+
+Type a question such as *"Which hospitals and substations in Norfolk are under water at +2 m?"* in the left panel. The server-side agent (`api/src/agent.js`):
+
+1. Connects to this app's own MCP server as a **real MCP client** (in-memory transport: the same tools and code path external agents use at `/mcp`).
+2. Lists the MCP tools and offers them to Azure OpenAI as function-calling tools.
+3. Runs a short tool-calling loop (at most 5 steps): the model chooses tools and arguments, the MCP server executes them against the exposure engine, and the results go back to the model.
+4. Returns the answer, the list of tools it called (shown in the UI), and a **map action**: the dashboard switches to the area and water level the agent looked up, or flies to the facility it examined.
+
+The model writes the prose; every number comes from a tool call. The system prompt forbids invented figures, requires the what-if caveat, treats tool output as data rather than instructions, and sends forecast, evacuation and safety questions to official sources. `/api/ask` has its own rate limit (10 per minute per client), and the model deployment's tokens-per-minute quota caps total spend.
+
+Auth is keyless: the Container App's managed identity has **Cognitive Services OpenAI User** on the account, and the account has key auth and public network access disabled.
 
 ## MCP server
 
@@ -68,6 +92,20 @@ claude mcp add --transport http hampton-roads-flood "$MCP_URL" --header "Authori
 
 Locally, `npm run dev` in `api/` opens `/mcp` without a key so you can use the MCP Inspector (`npx @modelcontextprotocol/inspector`, Streamable HTTP, `http://localhost:8080/mcp`). Deployed, the endpoint requires the bearer key and is rate limited; the deploy smoke test fails if it answers without one. For multi-user use, replace the key with Entra ID OAuth per the MCP authorization spec.
 
+## Network
+
+| AWS concept | Here |
+|---|---|
+| VPC | VNet `10.40.0.0/16` |
+| Private app subnet | `snet-apps` `/23`, delegated to Container Apps (workload-profiles environment) |
+| NAT gateway in a public subnet | NAT Gateway + static public IP attached to `snet-apps`: all outbound traffic leaves from one address (`terraform output nat_egress_ip`) |
+| Interface VPC endpoint + private hosted zone | Private endpoint in `snet-pe` + private DNS zone `privatelink.openai.azure.com` linked to the VNet |
+| ALB | Container Apps' built-in ingress (public, HTTPS) |
+
+The app is public on purpose (it's a demo site), but Azure OpenAI is not reachable from the internet at all: only from inside the VNet. To make the app itself private too, set `internal_load_balancer_enabled = true` on the environment and front it with Application Gateway or Front Door.
+
+Toggles in `infra/app/variables.tf`: `enable_nat_gateway`, `enable_ai`, `openai_private_endpoint`. Turning off the NAT Gateway cuts most of the fixed cost; Container Apps then uses default outbound.
+
 ## Data
 
 `scripts/build-data.mjs` writes three files into `data/`, which are baked into the container image:
@@ -90,6 +128,8 @@ cd api && npm ci && npm run dev             # http://localhost:8080 (API + MCP)
 cd web && npm ci && npx ng serve            # http://localhost:4200 (proxies /api and /mcp)
 ```
 
+To try "Ask the map" locally, point `AZURE_OPENAI_ENDPOINT` (and `AZURE_OPENAI_DEPLOYMENT`) at an Azure OpenAI deployment your `az login` account can reach with the *Cognitive Services OpenAI User* role. The deployed account is private-endpoint only, so it can't be reached from a laptop; use a separate dev deployment. Without an endpoint the panel shows that the assistant is off and everything else works.
+
 Optional: `export ARCGIS_API_KEY=...` before starting the API. The app uses Esri's World Imagery basemap and World Elevation terrain; the 3D buildings service may require a key, and if it can't load, the buildings toggle disables itself instead of breaking the scene.
 
 Tests: `cd api && npm test` covers the exposure maths, the data builder (with mocked OSM/USGS/Open-Meteo responses, including the fallback), the REST API, and every MCP tool through the official MCP client.
@@ -97,6 +137,8 @@ Tests: `cd api && npm test` covers the exposure maths, the data builder (with mo
 ## Deploy to Azure
 
 Same pattern as the companion `azure-openai-sentiment-demo` repo.
+
+Prerequisites: quota for `gpt-4.1-mini` (GlobalStandard) in your region (or set `openai_location`), and these resource providers registered: `Microsoft.App`, `Microsoft.ContainerService`, `Microsoft.ContainerRegistry`, `Microsoft.OperationalInsights`, `Microsoft.ManagedIdentity`, `Microsoft.Network`, `Microsoft.CognitiveServices` (the bootstrap does this).
 
 1. **Bootstrap once** (as subscription Owner): `cd infra/bootstrap && terraform init && terraform apply`, then `terraform output -raw github_setup_commands | bash` to set the repo's Actions variables and the `production` environment.
 2. **Optional**: add an `ARCGIS_API_KEY` repository secret (an ArcGIS Location Platform key with basemap access, restricted to your app's URL) to enable 3D buildings.
@@ -119,7 +161,18 @@ For planning-grade analysis, use NOAA's Sea Level Rise Viewer and storm-surge (S
 
 ## Cost
 
-No AI model is involved, so the running cost is the Container Registry Basic SKU plus a little Log Analytics; Container Apps scales to zero when idle. Open-Meteo, NOAA, USGS and Overpass are free public APIs (used within their fair-use limits: cached, rate limited, and monthly for data builds). A demo's ArcGIS basemap traffic should stay within the Location Platform free tier; check Esri's current limits.
+Approximate list prices (check the Azure pricing calculator for your region):
+
+| Item | Approx. per month |
+|---|---|
+| NAT Gateway + static public IP | ~$36 plus data processed |
+| Private endpoint | ~$7 |
+| Container Registry (Basic) | ~$5 |
+| Private DNS zone, Log Analytics | ~$1–3 |
+| Container Apps (scales to zero) | ~$0 idle |
+| Azure OpenAI gpt-4.1-mini | pay per token: a question with tool calls is a few thousand tokens, well under a cent |
+
+So roughly **$50/month** with the full private-network setup, or about **$5–10/month** with `enable_nat_gateway = false`. Destroy the stack when you aren't demoing to stop the fixed costs. Open-Meteo, NOAA, USGS and Overpass are free public APIs (used within their fair-use limits: cached, rate limited, and monthly for data builds). A demo's ArcGIS basemap traffic should stay within the Location Platform free tier; check Esri's current limits.
 
 ## Attribution
 

@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
@@ -88,6 +88,22 @@ export interface Conditions {
   note: string;
 }
 
+export interface AskResult {
+  answer: string;
+  toolCalls: { name: string; args: Record<string, unknown>; isError: boolean }[];
+  mapAction: { area: string | null; waterLevelM: number | null; focus: [number, number] | null; facilityId?: string } | null;
+  model: string;
+  tokens: number;
+  latencyMs: number;
+}
+
+export interface Health {
+  status: string;
+  dataReady: boolean;
+  mcp: boolean;
+  ai: boolean;
+}
+
 export interface PublicConfig {
   arcgisApiKey: string | null;
   buildingsLayerUrl: string;
@@ -107,4 +123,14 @@ export class FloodApiService {
   compare = (area: string, levels: number[]) => this.get<Comparison>('/api/compare', { area, levels: levels.join(',') });
   facility = (id: string) => this.get<FacilityDetails>('/api/facility', { id });
   conditions = (area: string) => this.get<Conditions>('/api/conditions', { area });
+  health = () => this.get<Health>('/api/health');
+
+  async ask(question: string): Promise<AskResult> {
+    try {
+      return await firstValueFrom(this.http.post<AskResult>('/api/ask', { question }));
+    } catch (err) {
+      const msg = err instanceof HttpErrorResponse ? err.error?.error ?? `Request failed (${err.status}).` : 'Request failed.';
+      throw new Error(msg);
+    }
+  }
 }
