@@ -45,7 +45,7 @@ test('agent calls the MCP tool, feeds the real result back, and returns a map ac
 
   assert.equal(r.answer, 'At +2 m, 2 of 5 facilities are exposed (what-if).');
   assert.deepEqual(r.toolCalls, [{ name: 'flood_exposure', args: { area: 'norfolk', water_level_m: 2 }, isError: false }]);
-  assert.deepEqual(r.mapAction, { area: 'norfolk', waterLevelM: 2, focus: null });
+  assert.deepEqual(r.mapAction, { area: 'norfolk', waterLevelM: 2, focus: null, highlightIds: ['osm:node/1', 'osm:way/3'] });
   assert.equal(r.tokens, 150);
 
   // The model was offered all six MCP tools, with the MCP input schemas as parameters.
@@ -96,8 +96,29 @@ test('facility_details focuses the map on that facility', () => {
     ],
     data,
   );
-  assert.deepEqual(action, { area: 'norfolk', waterLevelM: 3, focus: [-76.29, 36.85], facilityId: 'osm:way/3' });
+  assert.deepEqual(action, { area: 'norfolk', waterLevelM: 3, focus: [-76.29, 36.85], facilityId: 'osm:way/3', highlightIds: ['osm:way/3'] });
   assert.deepEqual(mapActionFrom([{ name: 'compare_scenarios', args: { area: 'williamsburg', water_levels_m: [1, 4] }, isError: false }], data).waterLevelM, 4);
+});
+
+test('find_facilities highlights what it found and shows the asked-about level', async () => {
+  // Mirrors the real question: "which schools in Norfolk flooded above 1.2 m, show me on the map".
+  const chat = scriptedChat([
+    toolCall('c1', 'find_facilities', { area: 'norfolk', category: 'power', max_elevation_m: 1.2 }),
+    final('One power facility is at or below 1.2 m.'),
+  ]);
+  const ask = createAgent({ data, conditions, chat, deployment: 'd', logger: quiet });
+  const r = await ask('Which power facilities in Norfolk flood at 1.2 m? Show me on the map.');
+  assert.deepEqual(r.mapAction, {
+    area: 'norfolk', waterLevelM: 1.2, focus: [-76.29, 36.85], facilityId: 'osm:node/1', highlightIds: ['osm:node/1'],
+  });
+
+  // Several matches: highlight them all, no single focus; the map fits them in view.
+  const many = mapActionFrom(
+    [{ name: 'find_facilities', args: { area: 'norfolk', max_elevation_m: 3 }, isError: false,
+       result: { facilities: [{ id: 'a', coordinates: [0, 0] }, { id: 'b', coordinates: [1, 1] }] } }],
+    data,
+  );
+  assert.deepEqual(many, { area: 'norfolk', waterLevelM: 3, focus: null, facilityId: undefined, highlightIds: ['a', 'b'] });
 });
 
 test('question validation and tool conversion', () => {

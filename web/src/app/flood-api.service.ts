@@ -91,7 +91,13 @@ export interface Conditions {
 export interface AskResult {
   answer: string;
   toolCalls: { name: string; args: Record<string, unknown>; isError: boolean }[];
-  mapAction: { area: string | null; waterLevelM: number | null; focus: [number, number] | null; facilityId?: string } | null;
+  mapAction: {
+    area: string | null;
+    waterLevelM: number | null;
+    focus: [number, number] | null;
+    facilityId?: string;
+    highlightIds?: string[];
+  } | null;
   model: string;
   tokens: number;
   latencyMs: number;

@@ -53,9 +53,21 @@ async function loadArcgis() {
 }
 type Arcgis = Awaited<ReturnType<typeof loadArcgis>>;
 
-function pinSymbol(depth: DepthClass): PointSymbol3DProperties & { type: 'point-3d' } {
+function pinSymbol(depth: DepthClass, highlighted = false): PointSymbol3DProperties & { type: 'point-3d' } {
   const color = DEPTH_COLORS[depth];
   const dry = depth === 'dry';
+  if (highlighted) {
+    // Facilities the AI answer is about: bigger, white-ringed, on a taller stem.
+    return {
+      type: 'point-3d',
+      verticalOffset: { screenLength: 70, maxWorldLength: 600, minWorldLength: 40 },
+      callout: { type: 'line', size: 2, color: [255, 255, 255, 0.95] },
+      symbolLayers: [
+        { type: 'icon', resource: { primitive: 'circle' }, size: 26, material: { color: [255, 255, 255, 0.25] }, outline: { color: [255, 255, 255, 1], size: 2 } },
+        { type: 'icon', resource: { primitive: 'circle' }, size: 14, material: { color }, outline: { color: [255, 255, 255, 1], size: 1.5 } },
+      ],
+    };
+  }
   return {
     type: 'point-3d',
     verticalOffset: { screenLength: dry ? 22 : 38, maxWorldLength: 260, minWorldLength: 18 },
@@ -102,6 +114,8 @@ export class SceneViewComponent implements OnDestroy {
   readonly showBuildings = input(true);
   readonly showWater = input(true);
   readonly focus = input<[number, number] | null>(null);
+  /** Facilities to emphasise (e.g. the ones an AI answer is about). */
+  readonly highlightIds = input<string[]>([]);
 
   readonly facilityClick = output<string>();
   readonly buildingsAvailable = output<boolean>();
@@ -143,8 +157,22 @@ export class SceneViewComponent implements OnDestroy {
 
     effect(() => {
       const depths = this.depthById();
+      const highlight = new Set(this.highlightIds());
       if (!this.ready()) return;
-      untracked(() => this.restyle(depths));
+      untracked(() => this.restyle(depths, highlight));
+    });
+
+    // Several highlighted facilities: frame them all. (A single one uses `focus`.)
+    effect(() => {
+      const ids = this.highlightIds();
+      const fc = this.facilities();
+      if (!this.ready() || ids.length < 2 || !fc) return;
+      untracked(() => {
+        const targets = ids.map((id) => this.graphicsById.get(id)).filter((g): g is Graphic => Boolean(g));
+        if (targets.length) {
+          this.view?.goTo({ target: targets, tilt: 58 }, { duration: 1600 }).catch(() => undefined);
+        }
+      });
     });
 
     effect(() => {
@@ -260,11 +288,12 @@ export class SceneViewComponent implements OnDestroy {
     this.graphicsById.clear();
     if (!fc) return;
     const depths = this.depthById();
+    const highlight = new Set(this.highlightIds());
     const graphics = fc.features.map((f) => {
       const g = new esri.Graphic({
         geometry: new esri.Point({ longitude: f.geometry.coordinates[0], latitude: f.geometry.coordinates[1] }),
         attributes: { id: f.properties.id, name: f.properties.name },
-        symbol: pinSymbol(depths.get(f.properties.id) ?? 'dry'),
+        symbol: pinSymbol(depths.get(f.properties.id) ?? 'dry', highlight.has(f.properties.id)),
       });
       this.graphicsById.set(f.properties.id, g);
       return g;
@@ -272,9 +301,9 @@ export class SceneViewComponent implements OnDestroy {
     this.facilityLayer.addMany(graphics);
   }
 
-  private restyle(depths: Map<string, DepthClass>) {
+  private restyle(depths: Map<string, DepthClass>, highlight: Set<string> = new Set(this.highlightIds())) {
     for (const [id, g] of this.graphicsById) {
-      g.symbol = pinSymbol(depths.get(id) ?? 'dry') as unknown as Graphic['symbol'];
+      g.symbol = pinSymbol(depths.get(id) ?? 'dry', highlight.has(id)) as unknown as Graphic['symbol'];
     }
   }
 
